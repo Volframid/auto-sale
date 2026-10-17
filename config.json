@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "autoAcceptPercent": 100,
+  "autoRejectBelowPercent": 100,
+  "autoRejectAbovePercent": 200,
+  "rejectChancePercent": 15,
+  "unattendedManual": true,
+  "retryDelayMs": 100,
+  "requestTimeoutMs": 1500,
+  "negotiationTimeoutMs": 10000,
+  "offerLifetimeMs": 30000,
+  "captureOnly": false,
+  "combatOfferDelayMs": 0,
+  "combatQuietMs": 1,
+  "inputAckTimeoutMs": 1500
+}

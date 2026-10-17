@@ -1,0 +1,15 @@
+{
+  "name": "auto-sale",
+  "author": "CEM",
+  "version": "1.0.9",
+  "description": "Fast background Trade Broker negotiation with guarded confirmations and recovery.",
+  "disableAutoUpdate": false,
+  "options": {
+    "cliName": "Auto Sale",
+    "guiName": "Auto Sale"
+  },
+  "servers": [
+    "https://raw.githubusercontent.com/Volframid/auto-sale/main/"
+  ],
+  "supportUrl": "https://github.com/Volframid/auto-sale/issues"
+}
