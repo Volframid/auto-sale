@@ -165,6 +165,17 @@ module.exports = function AutoSale(mod) {
     if (visibleContracts.size) result.push('visible-contract');
     return result;
   }
+  function visibleState() {
+    return Array.from(visibleContracts, ([type, id]) => ({ type, id }));
+  }
+  function recordState(reason) {
+    record('STATE', { reason, blockers: requestBlockers(), visibleContracts: visibleState(),
+      current: current && { phase: current.phase, attempts: current.attempts, contract: current.contract,
+        handshakeAccepted: Boolean(current.handshakeAccepted), nativeRequest: Boolean(current.nativeRequest) },
+      queued: queue.map(offer => ({ listing: offer.listing, decision: offer.decision, waitedMs: Date.now() - offer.receivedAt })),
+      lastOffer: lastOffer && { listing: lastOffer.listing, decision: lastOffer.decision,
+        phase: lastOffer.phase, finished: Boolean(lastOffer.finished), ageMs: Date.now() - lastOffer.receivedAt } });
+  }
   function recordWait(offer) {
     if (!logFile) return;
     const now = Date.now();
@@ -172,7 +183,7 @@ module.exports = function AutoSale(mod) {
     offer.nextWaitLogAt = now + 2000;
     record(offer.waitingLogged ? 'REQUEST_WAITING' : 'REQUEST_DEFERRED', {
       listing: offer.listing, waitedMs: now - offer.receivedAt,
-      blockers: requestBlockers(), trace: activity.slice()
+      blockers: requestBlockers(), visibleContracts: visibleState(), trace: activity.slice()
     });
     offer.waitingLogged = true;
   }
@@ -355,7 +366,6 @@ module.exports = function AutoSale(mod) {
       current.phase = 'negotiating'; armWatchdog(config.negotiationTimeoutMs); return false;
     }
     if (current && isNegotiation(event.type)) record('CONTRACT_IGNORED', { type: event.type, id: event.id, reason: 'offer-identity-mismatch' });
-    visibleContracts.set(event.type, event.id);
   });
   hook('S_REPLY_REQUEST_CONTRACT', 1, event => {
     if (isNegotiation(event.type)) record('CONTRACT_REPLY', { type: event.type });
@@ -380,7 +390,6 @@ module.exports = function AutoSale(mod) {
       if (current.phase !== 'cancelling') { current.handshakeAccepted = true; current.phase = 'negotiating'; armWatchdog(config.negotiationTimeoutMs); }
       return false;
     }
-    if (visibleContracts.get(event.type) === event.id) { visibleContracts.delete(event.type); wakeQueued(); }
   });
   hook('S_TRADE_BROKER_DEAL_INFO_UPDATE', 1, event => {
     record('DEAL_STAGE', { data: event });
@@ -426,8 +435,35 @@ module.exports = function AutoSale(mod) {
       else retry('server-cancelled-contract');
       return false;
     }
-    if (visibleContracts.get(event.type) === event.id) { visibleContracts.delete(event.type); wakeQueued(); }
   });
+  // This is client-window state, separate from server-side negotiation ownership.
+  // Observe the final visible result: instant modules can close windows locally,
+  // and later hooks can hide a real contract before it ever reaches the client.
+  const visibleWindow = { order: Number.MAX_SAFE_INTEGER, filter: { fake: null, modified: null, silenced: false } };
+  hook('S_REQUEST_CONTRACT', mod.majorPatchVersion >= 108 ? 2 : 1, event => {
+    if (!Number.isInteger(event.type) || !Number.isInteger(event.id)) return;
+    visibleContracts.set(event.type, event.id);
+    record('VISIBLE_CONTRACT_OPEN', { type: event.type, id: event.id, fake: Boolean(event.$fake) });
+  }, visibleWindow);
+  function closeVisible(event, packet) {
+    if (visibleContracts.get(event.type) !== event.id) return;
+    visibleContracts.delete(event.type);
+    record('VISIBLE_CONTRACT_CLOSE', { packet, type: event.type, id: event.id, fake: Boolean(event.$fake) });
+    wakeQueued();
+  }
+  for (const name of ['S_ACCEPT_CONTRACT', 'S_CANCEL_CONTRACT', 'S_REJECT_CONTRACT'])
+    hook(name, 1, event => closeVisible(event, name), visibleWindow);
+  // A native cancellation may have no server echo. Only an actually forwarded
+  // client close releases its exact window; hidden or synthetic sends do not.
+  const visibleInput = { order: Number.MAX_SAFE_INTEGER, filter: { fake: false, modified: null, silenced: false } };
+  hook('C_CANCEL_CONTRACT', 1, event => closeVisible(event, 'C_CANCEL_CONTRACT'), visibleInput);
+  hook('C_TRADE_BROKER_CLOSE', 'raw', () => {
+    if (!visibleContracts.has(28)) return;
+    const id = visibleContracts.get(28);
+    visibleContracts.delete(28);
+    record('VISIBLE_CONTRACT_CLOSE', { packet: 'C_TRADE_BROKER_CLOSE', type: 28, id });
+    wakeQueued();
+  }, visibleInput);
   hook('C_CANCEL_CONTRACT', 1, event => {
     if (owned(event)) {
       // Respect the client's cancellation instead of forcing a contract to stay open.
@@ -603,7 +639,7 @@ module.exports = function AutoSale(mod) {
     if (logFile) return;
     const dir = path.join(__dirname, 'logs'); fs.mkdirSync(dir, { recursive: true });
     logFile = path.join(dir, 'sale-' + new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid + '.jsonl');
-    record('LOG_START', { settings: config }); message('Sale log ON.');
+    record('LOG_START', { settings: config }); recordState('log-start'); message('Sale log ON.');
   }
   mod.command.add('sale', (arg, value) => {
     try {
@@ -627,7 +663,13 @@ module.exports = function AutoSale(mod) {
           break;
         }
         case 'accept': save(Object.assign({}, config, { autoAcceptPercent: Number(value) })); message('Accept threshold: ' + config.autoAcceptPercent + '%.'); break;
-        case 'status': message('Auto Sale ' + (config.captureOnly ? 'CAPTURE (automation paused)' : config.enabled ? 'ON' : 'OFF') + ' | accept ' + config.autoAcceptPercent + '% | ' + (current ? current.phase + ', attempt ' + current.attempts : 'idle') + ' | queued ' + queue.length + ' | log ' + (logFile ? 'ON' : 'OFF')); break;
+        case 'status': {
+          const blockers = requestBlockers(), windows = visibleState();
+          recordState('status');
+          message('Auto Sale ' + (config.captureOnly ? 'CAPTURE (automation paused)' : config.enabled ? 'ON' : 'OFF') + ' | accept ' + config.autoAcceptPercent + '% | ' + (current ? current.phase + ', attempt ' + current.attempts : 'idle') + ' | queued ' + queue.length +
+            ((queue.length || current && current.phase === 'retry-wait') && blockers.length ? ' | waiting: ' + blockers.join(', ') : '') +
+            (windows.length ? ' | windows: ' + windows.map(window => window.type + ':' + window.id).join(', ') : '') + ' | log ' + (logFile ? 'ON' : 'OFF')); break;
+        }
         default: message('sale on/off/status/reload/retry/log/capture | sale accept <percent>');
       }
     } catch (error) { message('Auto Sale settings unchanged: ' + error.message); }
