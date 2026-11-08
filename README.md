@@ -14,7 +14,7 @@ A skill refusal hidden from the game client does not clear the outstanding input
 
 Continuous attacks or movement can postpone the request until a suitable window. Pending automatic offers stay queued without a time limit. An unanswered or refused initial request retries after `retryDelayMs` (default 100 ms), checking the same gameplay guards each time. Each sent request waits for its response timeout before another attempt; requests never overlap. Buyer approval is still required.
 
-Window tracking follows the final client-visible packets, including windows opened or closed locally by other modules. A forwarded client cancellation clears only its exact contract; the broker-specific close clears only the broker window. Closed or hidden windows cannot leave a permanent sale blocker.
+Window tracking follows the final client-visible packets, including windows opened or closed locally by other modules. A forwarded native cancellation or rejection clears only its matching contract type and ID, even without a server closing reply. Hidden or synthetic outgoing packets do not release a visible window; the broker-specific close clears only the broker window.
 
 Once the server accepts a request, the module handles the negotiation instead of reopening it. Buyer rejection, client cancellation, map/session changes and `sale off` stop the operation. A final sale confirmation is never replayed after an uncertain result. The game offer message remains visible for manual Negotiate.
 

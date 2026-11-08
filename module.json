@@ -1,7 +1,7 @@
 {
   "name": "auto-sale",
   "author": "CEM",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Fast background Trade Broker negotiation with guarded confirmations and recovery.",
   "disableAutoUpdate": false,
   "options": {

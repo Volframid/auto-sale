@@ -453,10 +453,12 @@ module.exports = function AutoSale(mod) {
   }
   for (const name of ['S_ACCEPT_CONTRACT', 'S_CANCEL_CONTRACT', 'S_REJECT_CONTRACT'])
     hook(name, 1, event => closeVisible(event, name), visibleWindow);
-  // A native cancellation may have no server echo. Only an actually forwarded
-  // client close releases its exact window; hidden or synthetic sends do not.
+  // Native cancellation and rejection may close the client window without a
+  // server echo. Only a forwarded native close releases its exact window;
+  // hidden or synthetic sends do not.
   const visibleInput = { order: Number.MAX_SAFE_INTEGER, filter: { fake: false, modified: null, silenced: false } };
-  hook('C_CANCEL_CONTRACT', 1, event => closeVisible(event, 'C_CANCEL_CONTRACT'), visibleInput);
+  for (const name of ['C_CANCEL_CONTRACT', 'C_REJECT_CONTRACT'])
+    hook(name, 1, event => closeVisible(event, name), visibleInput);
   hook('C_TRADE_BROKER_CLOSE', 'raw', () => {
     if (!visibleContracts.has(28)) return;
     const id = visibleContracts.get(28);
